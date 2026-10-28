@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgroVisión | Diagnóstico aéreo</title>
+<script src="https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js"></script>
+<style>
+:root{--bg:#f3f6f1;--ink:#19352b;--muted:#64766d;--green:#246b4b;--line:#dbe5dc;--card:#fff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 Inter,system-ui,-apple-system,Segoe UI,sans-serif}
+header{background:#173f30;color:white;padding:26px max(20px,calc((100% - 1180px)/2));}
+.brand{font-size:13px;letter-spacing:.18em;text-transform:uppercase;color:#b9dfc5;font-weight:700}
+h1{font-size:clamp(28px,4vw,42px);line-height:1.1;margin:10px 0}
+header p{max-width:760px;color:#e0eee4;margin:0}
+main{max-width:1180px;margin:24px auto;padding:0 18px 48px}
+.grid{display:grid;grid-template-columns:330px 1fr;gap:18px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:20px;box-shadow:0 6px 22px #163b2510}
+h2{font-size:18px;margin:0 0 14px}label{display:block;font-weight:650;font-size:14px;margin:13px 0 6px}
+select,input[type=file],input[type=number]{width:100%;border:1px solid #cad8cc;background:#fff;border-radius:10px;padding:10px;color:var(--ink)}
+button{border:0;background:var(--green);color:white;padding:12px 16px;border-radius:11px;font-weight:700;cursor:pointer;margin-top:12px;width:100%}
+button.secondary{background:#e7f1e9;color:var(--green);border:1px solid #c9ddce}
+.small{font-size:12px;color:var(--muted)}.notice{background:#fff8e5;border:1px solid #f0dfab;color:#69521c;border-radius:12px;padding:12px;font-size:13px;margin-top:14px}
+.status{font-size:13px;color:var(--muted);margin-top:10px;white-space:pre-wrap}
+.results{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.metric{border:1px solid var(--line);border-radius:14px;padding:12px;background:#fbfdfb}
+.metric b{display:block;font-size:22px}.metric span{font-size:12px;color:var(--muted)}
+.maps{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:16px}
+.map{border:1px solid var(--line);border-radius:14px;padding:12px;min-width:0}
+.map h3{font-size:15px;margin:0 0 8px}.map canvas{width:100%;height:auto;display:block;border-radius:8px;background:#eef2ee}
+.legend{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:5px}
+.bandgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.hidden{display:none}.footer{color:var(--muted);font-size:12px;margin-top:18px}
+@media(max-width:850px){.grid{grid-template-columns:1fr}.results{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:540px){.maps{grid-template-columns:1fr}.results{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+<div class="brand">AgroVisión · Agricultura de precisión</div>
+<h1>Diagnóstico aéreo de cultivos</h1>
+<p>Explora la variabilidad de la vegetación en mandarina, caña de azúcar y zarzamora mediante índices espectrales y mapas de colores.</p>
+</header>
+<main>
+<div class="grid">
+<section class="card">
+<h2>1 · Configurar análisis</h2>
+<label for="crop">Cultivo</label>
+<select id="crop"><option>Mandarina</option><option>Caña de azúcar</option><option>Zarzamora</option></select>
+<label for="file">Imagen aérea (JPG, PNG o GeoTIFF)</label>
+<input id="file" type="file" accept=".jpg,.jpeg,.png,.tif,.tiff,image/*">
+<p class="small">Las imágenes se procesan localmente en tu navegador; no se envían a un servidor.</p>
+<div id="bandSettings" class="hidden">
+<label>Bandas GeoTIFF (número de banda, empezando en 1)</label>
+<div class="bandgrid">
+<div><label for="bR">Rojo (R)</label><input id="bR" type="number" min="1" value="1"></div>
+<div><label for="bG">Verde (G)</label><input id="bG" type="number" min="1" value="2"></div>
+<div><label for="bB">Azul (B)</label><input id="bB" type="number" min="1" value="3"></div>
+<div><label for="bNIR">NIR</label><input id="bNIR" type="number" min="1" value="4"></div>
+<div><label for="bRE">Red Edge</label><input id="bRE" type="number" min="1" value="5"></div>
+</div>
+<p class="small">Ajusta el orden según los metadatos del sensor. No todos los GeoTIFF tienen estas bandas.</p>
+</div>
+<button id="analyze">Analizar imagen</button>
+<button id="download" class="secondary" disabled>Descargar reporte CSV</button>
+<div class="notice"><b>Importante:</b> NDVI requiere rojo + NIR; NDRE requiere Red Edge + NIR. Una foto RGB normal solo permite estimar VARI. Los mapas son indicadores de variabilidad, no diagnósticos definitivos de plagas o enfermedades.</div>
+<div id="status" class="status">Carga una imagen para comenzar.</div>
+</section>
+<section class="card">
+<h2>2 · Resultados del análisis</h2>
+<div class="results">
+<div class="metric"><span>Cultivo</span><b id="cropResult">—</b></div>
+<div class="metric"><span>Dimensiones</span><b id="dimensions">—</b></div>
+<div class="metric"><span>Índices disponibles</span><b id="count">0</b></div>
+</div>
+<div id="maps" class="maps">
+<div class="map"><h3>Vista previa</h3><canvas id="preview" width="600" height="400"></canvas><div class="legend"><span>Imagen original</span><span>RGB</span></div></div>
+</div>
+<p class="footer">Los umbrales de interpretación deben calibrarse por cultivo, sensor, estación del año y etapa fenológica. Sin georreferenciación y resolución espacial conocida no se calculan hectáreas.</p>
+</section>
+</div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+let csvRows = [];
+let loadedFile = null;
+let previewRGB = null;
+let tifData = null;
+let tifWidth = 0, tifHeight = 0, tifCount = 0;
+
+function setStatus(s){$('status').textContent=s}
+function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
+function makeCanvas(id,w,h){const c=$(id);c.width=w;c.height=h;return c}
+function drawRGB(canvas,rgb,w,h){
+ canvas.width=w;canvas.height=h;const ctx=canvas.getContext('2d');
+ const img=ctx.createImageData(w,h);
+ for(let i=0,j=0;i<w*h;i++,j+=4){img.data[j]=rgb[i*3];img.data[j+1]=rgb[i*3+1];img.data[j+2]=rgb[i*3+2];img.data[j+3]=255}
+ ctx.putImageData(img,0,0)
+}
+function makeMap(title, vals, w,h,min,max){
+ const wrap=document.createElement('div');wrap.className='map';
+ const h3=document.createElement('h3');h3.textContent=title;wrap.appendChild(h3);
+ const c=document.createElement('canvas');c.width=w;c.height=h;wrap.appendChild(c);
+ const ctx=c.getContext('2d'), im=ctx.createImageData(w,h);
+ for(let i=0,j=0;i<vals.length;i++,j+=4){
+   const v=vals[i]; let t=Number.isFinite(v)?clamp((v-min)/(max-min),0,1):0.5;
+   // red -> yellow -> green gradient
+   let r,g,b;
+   if(t<0.5){let q=t*2;r=220;g=Math.round(65+165*q);b=Math.round(55-25*q)}
+   else{let q=(t-.5)*2;r=Math.round(220-190*q);g=Math.round(230-20*q);b=Math.round(30+35*q)}
+   im.data[j]=r;im.data[j+1]=g;im.data[j+2]=b;im.data[j+3]=Number.isFinite(v)?255:0;
+ }
+ ctx.putImageData(im,0,0);
+ const leg=document.createElement('div');leg.className='legend';leg.innerHTML=`<span>${min}</span><span>Valor del índice</span><span>${max}</span>`;wrap.appendChild(leg);
+ const stat=document.createElement('p');stat.className='small';
+ const good=vals.filter(Number.isFinite);
+ if(good.length){const avg=good.reduce((a,b)=>a+b,0)/good.length;stat.textContent=`Promedio: ${avg.toFixed(3)} · píxeles válidos: ${(100*good.length/vals.length).toFixed(1)}%`}
+ wrap.appendChild(stat);return wrap;
+}
+function calcIndex(a,b,mode){
+ const out=new Float32Array(a.length);
+ for(let i=0;i<a.length;i++){const d=mode==='vari'?a[i]+b[i]:a[i]+b[i];out[i]=Math.abs(d)>1e-8?(mode==='vari'?(b[i]-a[i])/d:(a[i]-b[i])/d):NaN}
+ return out;
+}
+function safeRatio(n,d){const out=new Float32Array(n.length);for(let i=0;i<n.length;i++)out[i]=Math.abs(d[i])>1e-8?n[i]/d[i]:NaN;return out}
+function calcND(a,b){const out=new Float32Array(a.length);for(let i=0;i<a.length;i++){const d=a[i]+b[i];out[i]=Math.abs(d)>1e-8?(a[i]-b[i])/d:NaN}return out}
+function addMap(title, vals, min=-1,max=1){$('maps').appendChild(makeMap(title,vals,tifWidth,tifHeight,min,max))}
+function summarize(name,arr){
+ const valid=Array.from(arr).filter(Number.isFinite);if(!valid.length)return;
+ const mean=valid.reduce((s,v)=>s+v,0)/valid.length;
+ let lo=0,mid=0,hi=0;
+ const cut1=name==='VARI'?0:0.2,cut2=name==='VARI'?0.2:0.5;
+ valid.forEach(v=>{if(v<cut1)lo++;else if(v<cut2)mid++;else hi++});
+ csvRows.push({Cultivo:$('crop').value,Indice:name,Promedio:mean.toFixed(5),Pixeles_validos_pct:(100*valid.length/arr.length).toFixed(2),Valores_bajos_pct:(100*lo/valid.length).toFixed(2),Valores_medios_pct:(100*mid/valid.length).toFixed(2),Valores_altos_pct:(100*hi/valid.length).toFixed(2)});
+}
+function showResults(indices){
+ $('maps').innerHTML='';
+ if(previewRGB)drawRGB($('preview'),previewRGB,tifWidth,tifHeight);
+ const p=document.createElement('div');p.className='map';p.innerHTML='<h3>Imagen original</h3>';p.appendChild($('preview'));const leg=document.createElement('div');leg.className='legend';leg.innerHTML='<span>Vista de entrada</span><span>RGB</span>';p.appendChild(leg);$('maps').appendChild(p);
+ csvRows=[];Object.entries(indices).forEach(([name,arr])=>{const range=name==='VARI'?[-1,1]:[-1,1];addMap(name,arr,...range);summarize(name,arr)});
+ $('cropResult').textContent=$('crop').value;$('dimensions').textContent=`${tifWidth} × ${tifHeight}`;$('count').textContent=Object.keys(indices).length;
+ $('download').disabled=!csvRows.length;
+}
+$('file').addEventListener('change', async e=>{
+ loadedFile=e.target.files[0]; if(!loadedFile)return;
+ const ext=loadedFile.name.toLowerCase().split('.').pop();
+ $('bandSettings').classList.toggle('hidden',!['tif','tiff'].includes(ext));
+ try{
+  if(['tif','tiff'].includes(ext)){
+   if(!window.GeoTIFF)throw new Error('No se pudo cargar el lector GeoTIFF. Comprueba tu conexión a internet.');
+   const t=await GeoTIFF.fromBlob(loadedFile);const image=await t.getImage();
+   tifWidth=image.getWidth();tifHeight=image.getHeight();tifCount=image.getSamplesPerPixel();
+   const rasters=await image.readRasters({interleave:false});
+   tifData=rasters.map(a=>Float32Array.from(a));
+   setStatus(`GeoTIFF cargado: ${tifWidth} × ${tifHeight}, ${tifCount} bandas. Revisa el orden de bandas antes de analizar.`);
+   const ri=Math.min(2,tifCount-1),gi=Math.min(1,tifCount-1),bi=0;
+   const R=tifData[ri],G=tifData[gi],B=tifData[bi];
+   previewRGB=new Uint8ClampedArray(tifWidth*tifHeight*3);
+   for(let i=0;i<R.length;i++){previewRGB[i*3]=scaleBand(R,i);previewRGB[i*3+1]=scaleBand(G,i);previewRGB[i*3+2]=scaleBand(B,i)}
+   drawRGB($('preview'),previewRGB,tifWidth,tifHeight);
+  } else {
+   const url=URL.createObjectURL(loadedFile);const img=new Image();
+   img.onload=()=>{const max=1100,scale=Math.min(1,max/Math.max(img.naturalWidth,img.naturalHeight));tifWidth=Math.max(1,Math.round(img.naturalWidth*scale));tifHeight=Math.max(1,Math.round(img.naturalHeight*scale));
+    const c=document.createElement('canvas');c.width=tifWidth;c.height=tifHeight;c.getContext('2d').drawImage(img,0,0,tifWidth,tifHeight);
+    const d=c.getContext('2d').getImageData(0,0,tifWidth,tifHeight).data;previewRGB=new Uint8ClampedArray(tifWidth*tifHeight*3);
+    const R=new Float32Array(tifWidth*tifHeight),G=new Float32Array(R.length),B=new Float32Array(R.length);
+    for(let i=0,j=0;i<R.length;i++,j+=4){R[i]=d[j]/255;G[i]=d[j+1]/255;B[i]=d[j+2]/255;previewRGB[i*3]=d[j];previewRGB[i*3+1]=d[j+1];previewRGB[i*3+2]=d[j+2]}
+    tifData={R,G,B};drawRGB($('preview'),previewRGB,tifWidth,tifHeight);setStatus('Imagen RGB cargada. Solo se calculará VARI; NDVI y NDRE requieren bandas espectrales adicionales.');URL.revokeObjectURL(url);
+   };img.onerror=()=>setStatus('No se pudo abrir la imagen.');img.src=url;
+  }
+ }catch(err){setStatus('Error al cargar: '+err.message)}
+});
+function scaleBand(arr,i){
+ // robust display scaling based on sampled quantiles, computed once per band
+ if(!arr._lohi){const sample=[];const step=Math.max(1,Math.floor(arr.length/50000));for(let k=0;k<arr.length;k+=step)if(Number.isFinite(arr[k]))sample.push(arr[k]);sample.sort((a,b)=>a-b);arr._lohi=[sample[Math.floor(sample.length*.02)]??0,sample[Math.floor(sample.length*.98)]??1]}
+ const [lo,hi]=arr._lohi;return Math.round(255*clamp((arr[i]-lo)/(hi-lo||1),0,1))
+}
+$('analyze').addEventListener('click',()=>{
+ try{
+  if(!loadedFile)throw new Error('Primero selecciona una imagen.');
+  const indices={};
+  if(tifData && Array.isArray(tifData)){
+   const band=id=>{const n=parseInt($(id).value,10);if(!n||n<1||n>tifData.length) return null;return tifData[n-1]};
+   const R=band('bR'),G=band('bG'),B=band('bB'),NIR=band('bNIR'),RE=band('bRE');
+   if(!R||!G||!B)throw new Error('No hay bandas RGB válidas. Ajusta los números de banda.');
+   const vari=new Float32Array(R.length);for(let i=0;i<R.length;i++){const d=G[i]+R[i]-B[i];vari[i]=Math.abs(d)>1e-8?(G[i]-R[i])/d:NaN}
+   indices.VARI=vari;
+   if(NIR){indices.NDVI=calcND(NIR,R)}
+   if(NIR&&RE){indices.NDRE=calcND(NIR,RE)}
+  } else {
+   const {R,G,B}=tifData;
+   const vari=new Float32Array(R.length);
+   for(let i=0;i<R.length;i++){const d=G[i]+R[i]-B[i];vari[i]=Math.abs(d)>1e-8?(G[i]-R[i])/d:NaN}
+   indices.VARI=vari;
+  }
+  showResults(indices);
+  setStatus('Análisis terminado. Revisa los mapas y descarga el reporte CSV.');
+ }catch(err){setStatus('No se pudo analizar: '+err.message)}
+});
+$('download').addEventListener('click',()=>{
+ const rows=csvRows;if(!rows.length)return;
+ const keys=Object.keys(rows[0]);const csv=[keys.join(','),...rows.map(r=>keys.map(k=>JSON.stringify(r[k]??'')).join(','))].join('\n');
+ const blob=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8;'});const url=URL.createObjectURL(blob);
+ const a=document.createElement('a');a.href=url;a.download='reporte_agrovision.csv';a.click();URL.revokeObjectURL(url);
+});
+</script>
+</body>
+</html>
