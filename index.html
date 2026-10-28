@@ -133,15 +133,22 @@ function summarize(name,arr){
  csvRows.push({Cultivo:$('crop').value,Indice:name,Promedio:mean.toFixed(5),Pixeles_validos_pct:(100*valid.length/arr.length).toFixed(2),Valores_bajos_pct:(100*lo/valid.length).toFixed(2),Valores_medios_pct:(100*mid/valid.length).toFixed(2),Valores_altos_pct:(100*hi/valid.length).toFixed(2)});
 }
 function showResults(indices){
+ // Do not move the original preview canvas into the results container: clearing
+ // the maps on a second run would remove it and make the next analysis fail.
  $('maps').innerHTML='';
- if(previewRGB)drawRGB($('preview'),previewRGB,tifWidth,tifHeight);
- const p=document.createElement('div');p.className='map';p.innerHTML='<h3>Imagen original</h3>';p.appendChild($('preview'));const leg=document.createElement('div');leg.className='legend';leg.innerHTML='<span>Vista de entrada</span><span>RGB</span>';p.appendChild(leg);$('maps').appendChild(p);
- csvRows=[];Object.entries(indices).forEach(([name,arr])=>{const range=name==='VARI'?[-1,1]:[-1,1];addMap(name,arr,...range);summarize(name,arr)});
+ const p=document.createElement('div');p.className='map';
+ const title=document.createElement('h3');title.textContent='Imagen original';p.appendChild(title);
+ const canvas=document.createElement('canvas');canvas.width=tifWidth;canvas.height=tifHeight;
+ if(previewRGB)drawRGB(canvas,previewRGB,tifWidth,tifHeight);
+ p.appendChild(canvas);
+ const leg=document.createElement('div');leg.className='legend';leg.innerHTML='<span>Vista de entrada</span><span>RGB</span>';p.appendChild(leg);$('maps').appendChild(p);
+ csvRows=[];Object.entries(indices).forEach(([name,arr])=>{addMap(name,arr,-1,1);summarize(name,arr)});
  $('cropResult').textContent=$('crop').value;$('dimensions').textContent=`${tifWidth} × ${tifHeight}`;$('count').textContent=Object.keys(indices).length;
  $('download').disabled=!csvRows.length;
 }
 $('file').addEventListener('change', async e=>{
  loadedFile=e.target.files[0]; if(!loadedFile)return;
+ tifData=null;previewRGB=null;$('analyze').disabled=true;$('download').disabled=true;
  const ext=loadedFile.name.toLowerCase().split('.').pop();
  $('bandSettings').classList.toggle('hidden',!['tif','tiff'].includes(ext));
  try{
@@ -151,7 +158,7 @@ $('file').addEventListener('change', async e=>{
    tifWidth=image.getWidth();tifHeight=image.getHeight();tifCount=image.getSamplesPerPixel();
    const rasters=await image.readRasters({interleave:false});
    tifData=rasters.map(a=>Float32Array.from(a));
-   setStatus(`GeoTIFF cargado: ${tifWidth} × ${tifHeight}, ${tifCount} bandas. Revisa el orden de bandas antes de analizar.`);
+   setStatus(`GeoTIFF cargado: ${tifWidth} × ${tifHeight}, ${tifCount} bandas. Revisa el orden de bandas antes de analizar.`);$('analyze').disabled=false;
    const ri=Math.min(2,tifCount-1),gi=Math.min(1,tifCount-1),bi=0;
    const R=tifData[ri],G=tifData[gi],B=tifData[bi];
    previewRGB=new Uint8ClampedArray(tifWidth*tifHeight*3);
@@ -164,10 +171,10 @@ $('file').addEventListener('change', async e=>{
     const d=c.getContext('2d').getImageData(0,0,tifWidth,tifHeight).data;previewRGB=new Uint8ClampedArray(tifWidth*tifHeight*3);
     const R=new Float32Array(tifWidth*tifHeight),G=new Float32Array(R.length),B=new Float32Array(R.length);
     for(let i=0,j=0;i<R.length;i++,j+=4){R[i]=d[j]/255;G[i]=d[j+1]/255;B[i]=d[j+2]/255;previewRGB[i*3]=d[j];previewRGB[i*3+1]=d[j+1];previewRGB[i*3+2]=d[j+2]}
-    tifData={R,G,B};drawRGB($('preview'),previewRGB,tifWidth,tifHeight);setStatus('Imagen RGB cargada. Solo se calculará VARI; NDVI y NDRE requieren bandas espectrales adicionales.');URL.revokeObjectURL(url);
-   };img.onerror=()=>setStatus('No se pudo abrir la imagen.');img.src=url;
+    tifData={R,G,B};drawRGB($('preview'),previewRGB,tifWidth,tifHeight);setStatus('Imagen RGB cargada. Solo se calculará VARI; NDVI y NDRE requieren bandas espectrales adicionales.');$('analyze').disabled=false;URL.revokeObjectURL(url);
+   };img.onerror=()=>{ $('analyze').disabled=true;setStatus('No se pudo abrir la imagen. Prueba con un JPG o PNG válido.');URL.revokeObjectURL(url)};img.src=url;
   }
- }catch(err){setStatus('Error al cargar: '+err.message)}
+ }catch(err){$('analyze').disabled=true;setStatus('Error al cargar: '+err.message)}
 });
 function scaleBand(arr,i){
  // robust display scaling based on sampled quantiles, computed once per band
